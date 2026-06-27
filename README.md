@@ -49,6 +49,15 @@ python -m pip install -e ".[dev]"
 python scripts/train_dqn.py --episodes 1000 --eval-games 100 --device auto --checkpoint checkpoints/dqn.pt
 ```
 
+Training prints a live progress bar by default:
+
+```text
+train [############----------------]  42.0% 420/1000 eps=0.801 recent_reward=+0.024 avg_loss=0.0031 elapsed=00:12 eta=00:17
+```
+
+Use `--progress-every 50` to refresh more often, or `--no-progress` to disable
+the live bar.
+
 Force CUDA and fail fast if the GPU is not available:
 
 ```bash

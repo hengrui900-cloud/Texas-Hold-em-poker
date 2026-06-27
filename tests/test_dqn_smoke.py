@@ -29,6 +29,29 @@ def test_dqn_training_smoke_saves_checkpoint(tmp_path):
     assert metrics["device"].startswith(("cpu", "cuda"))
 
 
+def test_training_progress_output_shows_percent_eta_and_device(tmp_path, capsys):
+    checkpoint = tmp_path / "dqn.pt"
+
+    train(
+        episodes=5,
+        eval_games=2,
+        seed=4,
+        checkpoint_path=checkpoint,
+        batch_size=4,
+        replay_start_size=4,
+        hidden_size=16,
+        device="auto",
+        show_progress=True,
+        progress_every=2,
+    )
+
+    output = capsys.readouterr().out
+    assert "training device=" in output
+    assert "100.0%" in output
+    assert "eta=" in output
+    assert "evaluating games=" in output
+
+
 def test_dqn_agent_can_be_placed_on_cuda_when_available():
     if not torch.cuda.is_available():
         pytest.skip("CUDA is not available in this environment")
