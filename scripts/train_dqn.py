@@ -61,16 +61,24 @@ def train(
     eval_games: int = 100,
     seed: int = 0,
     checkpoint_path: str | Path = "checkpoints/dqn.pt",
-    batch_size: int = 32,
-    replay_start_size: int = 32,
+    batch_size: int = 64,
+    replay_start_size: int = 64,
+    hidden_size: int = 128,
+    device: str = "auto",
+    require_cuda: bool = False,
 ):
     env = TexasHoldemEnv(seed=seed)
     agent = DQNAgent(
         state_size=env.observation_size,
+        hidden_size=hidden_size,
         batch_size=batch_size,
+        replay_start_size=replay_start_size,
         replay_size=max(1000, replay_start_size * 4),
         seed=seed,
+        device=device,
     )
+    if require_cuda and agent.device.type != "cuda":
+        raise RuntimeError(f"CUDA was required, but the DQN agent is running on {agent.device_name}.")
     opponent = RandomAgent(seed=seed + 1)
     episode_rewards = []
 
@@ -87,15 +95,21 @@ def train(
         "episode_rewards": episode_rewards,
         "average_eval_reward": average_eval_reward,
         "checkpoint_path": str(checkpoint_path),
+        "device": agent.device_name,
     }
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train a NumPy DQN agent for heads-up Texas Hold'em.")
+    parser = argparse.ArgumentParser(description="Train a PyTorch DQN agent for heads-up Texas Hold'em.")
     parser.add_argument("--episodes", type=int, default=1000)
     parser.add_argument("--eval-games", type=int, default=100)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/dqn.pt"))
+    parser.add_argument("--device", type=str, default="auto", help="auto, cuda, cuda:0, or cpu")
+    parser.add_argument("--require-cuda", action="store_true", help="Fail if CUDA is not available.")
+    parser.add_argument("--batch-size", type=int, default=64)
+    parser.add_argument("--replay-start-size", type=int, default=64)
+    parser.add_argument("--hidden-size", type=int, default=128)
     args = parser.parse_args()
 
     metrics = train(
@@ -103,8 +117,14 @@ def main():
         eval_games=args.eval_games,
         seed=args.seed,
         checkpoint_path=args.checkpoint,
+        batch_size=args.batch_size,
+        replay_start_size=args.replay_start_size,
+        hidden_size=args.hidden_size,
+        device=args.device,
+        require_cuda=args.require_cuda,
     )
     print(f"saved_checkpoint={metrics['checkpoint_path']}")
+    print(f"device={metrics['device']}")
     print(f"average_eval_reward={metrics['average_eval_reward']:.4f}")
 
 

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections import deque, namedtuple
-import pickle
 
 import numpy as np
+import torch
+from torch import nn
+import torch.nn.functional as F
 
 from texas_holdem.actions import Action
 
@@ -11,21 +13,51 @@ from texas_holdem.actions import Action
 Transition = namedtuple("Transition", "state action reward next_state done next_legal_actions")
 
 
+def resolve_device(device: str | torch.device = "auto") -> torch.device:
+    if isinstance(device, torch.device):
+        requested = device.type
+    else:
+        requested = str(device).lower()
+
+    if requested == "auto":
+        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if requested.startswith("cuda") and not torch.cuda.is_available():
+        raise RuntimeError("CUDA was requested, but torch.cuda.is_available() is False.")
+    return torch.device(requested)
+
+
+class QNetwork(nn.Module):
+    def __init__(self, state_size: int, hidden_size: int, num_actions: int):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(state_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, num_actions),
+        )
+
+    def forward(self, states: torch.Tensor) -> torch.Tensor:
+        return self.net(states)
+
+
 class DQNAgent:
     def __init__(
         self,
         state_size: int,
         num_actions: int = 5,
-        hidden_size: int = 64,
+        hidden_size: int = 128,
         learning_rate: float = 0.001,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.05,
         epsilon_decay: int = 2000,
         replay_size: int = 10000,
-        batch_size: int = 32,
+        batch_size: int = 64,
+        replay_start_size: int = 64,
         target_update: int = 100,
         seed: int | None = None,
+        device: str | torch.device = "auto",
     ):
         self.state_size = state_size
         self.num_actions = num_actions
@@ -36,17 +68,21 @@ class DQNAgent:
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
         self.batch_size = batch_size
+        self.replay_start_size = replay_start_size
         self.target_update = target_update
+        self.device = resolve_device(device)
         self.rng = np.random.default_rng(seed)
         self.memory = deque(maxlen=replay_size)
         self.steps = 0
 
-        scale1 = np.sqrt(2.0 / state_size)
-        scale2 = np.sqrt(2.0 / hidden_size)
-        self.w1 = self.rng.normal(0.0, scale1, size=(state_size, hidden_size)).astype(np.float32)
-        self.b1 = np.zeros(hidden_size, dtype=np.float32)
-        self.w2 = self.rng.normal(0.0, scale2, size=(hidden_size, num_actions)).astype(np.float32)
-        self.b2 = np.zeros(num_actions, dtype=np.float32)
+        if seed is not None:
+            torch.manual_seed(seed)
+            if self.device.type == "cuda":
+                torch.cuda.manual_seed_all(seed)
+
+        self.q_network = QNetwork(state_size, hidden_size, num_actions).to(self.device)
+        self.target_network = QNetwork(state_size, hidden_size, num_actions).to(self.device)
+        self.optimizer = torch.optim.Adam(self.q_network.parameters(), lr=learning_rate)
         self.copy_target()
 
     @property
@@ -54,19 +90,30 @@ class DQNAgent:
         fraction = min(1.0, self.steps / float(max(1, self.epsilon_decay)))
         return self.epsilon_start + fraction * (self.epsilon_end - self.epsilon_start)
 
+    @property
+    def device_name(self) -> str:
+        if self.device.type == "cuda":
+            return f"cuda:{torch.cuda.get_device_name(self.device)}"
+        return str(self.device)
+
     def act(self, observation: dict, legal_actions=None, training: bool = True):
         legal = [int(action) for action in (legal_actions or observation["legal_actions"])]
+        if not legal:
+            raise ValueError("Cannot act without legal actions")
         if training and self.rng.random() < self.epsilon:
             return Action(int(self.rng.choice(legal)))
+
         q_values = self.predict(observation["obs"])
         masked = np.full(self.num_actions, -np.inf, dtype=np.float32)
         masked[legal] = q_values[legal]
         return Action(int(np.argmax(masked)))
 
-    def predict(self, state: np.ndarray, target: bool = False) -> np.ndarray:
-        state_batch = np.asarray(state, dtype=np.float32).reshape(1, -1)
-        q_values, _ = self._forward(state_batch, target=target)
-        return q_values[0]
+    def predict(self, state: np.ndarray) -> np.ndarray:
+        self.q_network.eval()
+        with torch.no_grad():
+            state_tensor = torch.as_tensor(state, dtype=torch.float32, device=self.device).view(1, -1)
+            q_values = self.q_network(state_tensor)
+        return q_values.squeeze(0).detach().cpu().numpy()
 
     def remember(self, state, action, reward, next_state, done, next_legal_actions):
         self.memory.append(
@@ -81,112 +128,89 @@ class DQNAgent:
         )
 
     def train_step(self):
-        if len(self.memory) < self.batch_size:
+        min_memory = max(self.batch_size, self.replay_start_size)
+        if len(self.memory) < min_memory:
             self.steps += 1
             return None
 
         indices = self.rng.choice(len(self.memory), size=self.batch_size, replace=False)
         batch = [self.memory[int(index)] for index in indices]
-        states = np.stack([item.state for item in batch])
-        actions = np.array([item.action for item in batch], dtype=np.int64)
-        rewards = np.array([item.reward for item in batch], dtype=np.float32)
-        next_states = np.stack([item.next_state for item in batch])
-        done = np.array([item.done for item in batch], dtype=bool)
+        states = torch.as_tensor(np.stack([item.state for item in batch]), dtype=torch.float32, device=self.device)
+        actions = torch.as_tensor([item.action for item in batch], dtype=torch.long, device=self.device)
+        rewards = torch.as_tensor([item.reward for item in batch], dtype=torch.float32, device=self.device)
+        next_states = torch.as_tensor(np.stack([item.next_state for item in batch]), dtype=torch.float32, device=self.device)
+        done = torch.as_tensor([item.done for item in batch], dtype=torch.bool, device=self.device)
 
-        next_q, _ = self._forward(next_states, target=True)
-        max_next = np.zeros(self.batch_size, dtype=np.float32)
-        for row, item in enumerate(batch):
-            if item.done or not item.next_legal_actions:
-                max_next[row] = 0.0
-            else:
-                max_next[row] = np.max(next_q[row, item.next_legal_actions])
+        self.q_network.train()
+        q_values = self.q_network(states).gather(1, actions.unsqueeze(1)).squeeze(1)
 
-        targets = rewards + (~done).astype(np.float32) * self.gamma * max_next
-        q_values, cache = self._forward(states, target=False)
-        chosen_q = q_values[np.arange(self.batch_size), actions]
-        errors = chosen_q - targets
-        loss = float(np.mean(errors**2))
+        with torch.no_grad():
+            next_q = self.target_network(next_states)
+            masked_next_q = torch.full_like(next_q, -1.0e9)
+            for row, item in enumerate(batch):
+                if item.next_legal_actions:
+                    masked_next_q[row, item.next_legal_actions] = next_q[row, item.next_legal_actions]
+            max_next = masked_next_q.max(dim=1).values
+            max_next = torch.where(done, torch.zeros_like(max_next), max_next)
+            targets = rewards + (~done).float() * self.gamma * max_next
 
-        grad_q = np.zeros_like(q_values)
-        grad_q[np.arange(self.batch_size), actions] = (2.0 / self.batch_size) * errors
-        self._backward(cache, grad_q)
+        loss = F.smooth_l1_loss(q_values, targets)
+        self.optimizer.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=5.0)
+        self.optimizer.step()
 
         self.steps += 1
         if self.steps % self.target_update == 0:
             self.copy_target()
-        return loss
-
-    def _forward(self, states: np.ndarray, target: bool = False):
-        if target:
-            w1, b1, w2, b2 = self.target_w1, self.target_b1, self.target_w2, self.target_b2
-        else:
-            w1, b1, w2, b2 = self.w1, self.b1, self.w2, self.b2
-        z1 = states @ w1 + b1
-        hidden = np.maximum(z1, 0.0)
-        q_values = hidden @ w2 + b2
-        return q_values, (states, z1, hidden)
-
-    def _backward(self, cache, grad_q):
-        states, z1, hidden = cache
-        grad_w2 = hidden.T @ grad_q
-        grad_b2 = grad_q.sum(axis=0)
-        grad_hidden = grad_q @ self.w2.T
-        grad_z1 = grad_hidden * (z1 > 0)
-        grad_w1 = states.T @ grad_z1
-        grad_b1 = grad_z1.sum(axis=0)
-
-        self.w2 -= self.learning_rate * grad_w2
-        self.b2 -= self.learning_rate * grad_b2
-        self.w1 -= self.learning_rate * grad_w1
-        self.b1 -= self.learning_rate * grad_b1
+        return float(loss.detach().cpu().item())
 
     def copy_target(self):
-        self.target_w1 = self.w1.copy()
-        self.target_b1 = self.b1.copy()
-        self.target_w2 = self.w2.copy()
-        self.target_b2 = self.b2.copy()
+        self.target_network.load_state_dict(self.q_network.state_dict())
+        self.target_network.eval()
 
     def save(self, path):
         payload = {
-            "state_size": self.state_size,
-            "num_actions": self.num_actions,
-            "hidden_size": self.hidden_size,
-            "learning_rate": self.learning_rate,
-            "gamma": self.gamma,
-            "epsilon_start": self.epsilon_start,
-            "epsilon_end": self.epsilon_end,
-            "epsilon_decay": self.epsilon_decay,
-            "batch_size": self.batch_size,
-            "target_update": self.target_update,
+            "format": "texas_holdem_pytorch_dqn_v1",
+            "config": {
+                "state_size": self.state_size,
+                "num_actions": self.num_actions,
+                "hidden_size": self.hidden_size,
+                "learning_rate": self.learning_rate,
+                "gamma": self.gamma,
+                "epsilon_start": self.epsilon_start,
+                "epsilon_end": self.epsilon_end,
+                "epsilon_decay": self.epsilon_decay,
+                "batch_size": self.batch_size,
+                "replay_start_size": self.replay_start_size,
+                "target_update": self.target_update,
+            },
             "steps": self.steps,
-            "w1": self.w1,
-            "b1": self.b1,
-            "w2": self.w2,
-            "b2": self.b2,
+            "q_network": self.q_network.state_dict(),
+            "target_network": self.target_network.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
         }
-        with open(path, "wb") as file:
-            pickle.dump(payload, file)
+        torch.save(payload, path)
 
     @classmethod
-    def load(cls, path):
-        with open(path, "rb") as file:
-            payload = pickle.load(file)
-        agent = cls(
-            state_size=payload["state_size"],
-            num_actions=payload["num_actions"],
-            hidden_size=payload["hidden_size"],
-            learning_rate=payload["learning_rate"],
-            gamma=payload["gamma"],
-            epsilon_start=payload["epsilon_start"],
-            epsilon_end=payload["epsilon_end"],
-            epsilon_decay=payload["epsilon_decay"],
-            batch_size=payload["batch_size"],
-            target_update=payload["target_update"],
-        )
+    def load(cls, path, device: str | torch.device = "auto"):
+        resolved_device = resolve_device(device)
+        try:
+            payload = torch.load(path, map_location=resolved_device, weights_only=False)
+        except TypeError:
+            payload = torch.load(path, map_location=resolved_device)
+        if payload.get("format") != "texas_holdem_pytorch_dqn_v1":
+            raise ValueError("Unsupported checkpoint format. Retrain with the PyTorch DQN version.")
+
+        agent = cls(**payload["config"], device=resolved_device)
         agent.steps = payload["steps"]
-        agent.w1 = payload["w1"]
-        agent.b1 = payload["b1"]
-        agent.w2 = payload["w2"]
-        agent.b2 = payload["b2"]
-        agent.copy_target()
+        agent.q_network.load_state_dict(payload["q_network"])
+        agent.target_network.load_state_dict(payload["target_network"])
+        agent.optimizer.load_state_dict(payload["optimizer"])
+        for state in agent.optimizer.state.values():
+            for key, value in state.items():
+                if torch.is_tensor(value):
+                    state[key] = value.to(agent.device)
+        agent.q_network.to(agent.device)
+        agent.target_network.to(agent.device)
         return agent

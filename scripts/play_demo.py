@@ -13,24 +13,26 @@ from texas_holdem.agents import DQNAgent, RandomAgent
 from texas_holdem.env import TexasHoldemEnv, format_cards
 
 
-def load_or_random_agent(path: Path, state_size: int):
+def load_or_random_agent(path: Path, state_size: int, device: str):
     if path.exists():
-        return DQNAgent.load(path)
-    return DQNAgent(state_size=state_size, epsilon_start=1.0, epsilon_end=1.0)
+        return DQNAgent.load(path, device=device)
+    return DQNAgent(state_size=state_size, epsilon_start=1.0, epsilon_end=1.0, device=device)
 
 
 def main():
     parser = argparse.ArgumentParser(description="Print one virtual Texas Hold'em duel.")
     parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/dqn.pt"))
     parser.add_argument("--seed", type=int, default=7)
+    parser.add_argument("--device", type=str, default="auto", help="auto, cuda, cuda:0, or cpu")
     args = parser.parse_args()
 
     env = TexasHoldemEnv(seed=args.seed)
-    agent = load_or_random_agent(args.checkpoint, env.observation_size)
+    agent = load_or_random_agent(args.checkpoint, env.observation_size, args.device)
     opponent = RandomAgent(seed=args.seed + 1)
     observation = env.reset()
     done = False
 
+    print(f"device={agent.device_name}")
     print("Initial state")
     print(env.render())
     print()
