@@ -14,6 +14,8 @@ evaluation, and a text demo of one virtual hand.
   target network, checkpoint save/load, and epsilon-greedy exploration.
 - Random and simple rule-based opponents.
 - CLI scripts for training, evaluating, and showing one virtual duel.
+- Local Web table for one human player against three AI opponents, including
+  action buttons, AI thinking, Q-value bars, action history, and win/loss trend.
 
 ## Install
 
@@ -78,6 +80,34 @@ python scripts/play_demo.py --checkpoint checkpoints/dqn.pt --seed 7 --device au
 
 The demo prints the hole cards, community cards, actions, pot movement, and
 final payoff for a single virtual hand.
+
+## Web Table
+
+Start the local interactive table:
+
+```bash
+python scripts/serve_web.py --host 127.0.0.1 --port 8765 --checkpoint checkpoints/dqn.pt
+```
+
+Then open:
+
+```text
+http://127.0.0.1:8765
+```
+
+The Web table runs one human player against three AI seats. The DQN seat loads
+`checkpoints/dqn.pt` when it exists; otherwise the interface keeps working with
+rule-based fallback decisions. The page supports:
+
+- `Fold`
+- `Check / Call`
+- `Raise 1/2 Pot`
+- `Raise Pot`
+- `All-in`
+- `New Hand`
+
+The right-side strategy panel shows the latest AI intent, legal actions,
+Q-values, recent betting actions, and a running win/loss trend.
 
 ## Relationship to RLCard
 

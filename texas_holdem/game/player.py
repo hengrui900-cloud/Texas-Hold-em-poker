@@ -11,6 +11,7 @@ class Player:
     stack: int
     hand: list[Card] = field(default_factory=list)
     committed: int = 0
+    total_committed: int = 0
     folded: bool = False
     all_in: bool = False
 
@@ -20,6 +21,7 @@ class Player:
         paid = min(amount, self.stack)
         self.stack -= paid
         self.committed += paid
+        self.total_committed += paid
         if self.stack == 0:
             self.all_in = True
         return paid

@@ -8,3 +8,4 @@ venv/
 checkpoints/
 *.pt
 *.npz
+*.log
