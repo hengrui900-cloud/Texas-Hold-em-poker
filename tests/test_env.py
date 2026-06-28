@@ -51,3 +51,16 @@ def test_environment_observation_contains_vector_and_action_mask():
     assert observation["obs"].shape == (env.observation_size,)
     assert observation["action_mask"].shape == (len(Action),)
     assert set(observation["legal_actions"]) == set(env.legal_actions())
+
+
+def test_observation_includes_public_betting_context_after_action():
+    env = TexasHoldemEnv(seed=13)
+    env.reset()
+    before = env.observe()["obs"].copy()
+
+    env.step(Action.CHECK_CALL)
+    after = env.observe()["obs"]
+
+    assert env.observation_size > 109
+    assert after.shape == (env.observation_size,)
+    assert after[109:].sum() > before[109:].sum()

@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Strategy Studio Table</title>
+    <title>德州扑克筹码桌</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
@@ -12,31 +12,24 @@
         <div class="brand">
           <div class="brand-mark">TH</div>
           <div>
-            <h1>Strategy Studio Table</h1>
-            <span>Texas Hold'em</span>
+            <h1>德州扑克筹码桌</h1>
+            <span>初始 $1000 · 小盲 $20 · 大盲 $80</span>
           </div>
         </div>
         <div class="top-actions">
-          <button id="newHandTop" class="ghost-button">New Hand</button>
-          <button id="reloadState" class="ghost-button">Refresh</button>
-          <label class="select-label">
-            Difficulty
-            <select id="difficultySelect">
-              <option>Mixed</option>
-              <option>Conservative</option>
-              <option>Aggressive</option>
-            </select>
-          </label>
-          <div class="device-pill" id="devicePill">device: loading</div>
+          <button id="newHandTop" class="ghost-button primary">开始游戏</button>
+          <button id="resetGameTop" class="ghost-button">重置游戏</button>
+          <button id="reloadState" class="ghost-button">刷新</button>
+          <div class="device-pill" id="devicePill">模型载入中</div>
         </div>
       </header>
 
       <section class="game-layout">
-        <section class="table-stage" aria-label="Poker table">
+        <section class="table-stage" aria-label="德州扑克牌桌">
           <div class="street-steps" id="streetSteps"></div>
           <div class="table-wrap">
-            <img class="table-image" src="/assets/poker-table-cropped.png" alt="Empty poker table" />
-            <div class="pot-pill" id="potPill">Pot: 0 BB</div>
+            <img class="table-image" src="/assets/poker-table-cropped.png" alt="德州扑克桌" />
+            <div class="pot-pill" id="potPill">底池 $0</div>
             <div class="community" id="communityCards"></div>
             <div class="table-wordmark">TEXAS HOLD'EM</div>
             <div class="seat seat-top" id="seat1"></div>
@@ -44,59 +37,58 @@
             <div class="seat seat-left" id="seat3"></div>
             <div class="seat seat-bottom" id="seat0"></div>
           </div>
-          <div class="action-rail">
-            <button class="action-button fold" data-action="fold">Fold</button>
-            <button class="action-button call" data-action="check_call">Check / Call</button>
-            <button class="action-button raise" data-action="raise_half_pot">Raise 1/2 Pot</button>
-            <button class="action-button raise" data-action="raise_pot">Raise Pot</button>
-            <button class="action-button allin" data-action="all_in">All-in</button>
-          </div>
-          <div class="raise-strip">
-            <label>
-              Raise Amount
-              <input id="raiseAmount" value="0.0" readonly />
-            </label>
-            <input id="raiseSlider" type="range" min="0" max="100" value="0" />
-            <button class="small-button" id="quickHalf">1/2 Pot</button>
-            <button class="small-button" id="quickPot">Pot</button>
-            <button class="small-button" id="quickMax">Max</button>
+
+          <div class="rule-banner" id="ruleTip">请等待牌局载入。</div>
+
+          <div class="betting-dock" aria-label="下注操作区">
+            <section class="chip-zone">
+              <div class="dock-title">
+                <span>筹码区下注</span>
+                <strong id="selectedBetText">$0</strong>
+              </div>
+              <div class="chip-buttons" id="chipButtons"></div>
+              <div class="bet-note" id="betNote">点击筹码，点几下就下几个注。</div>
+            </section>
+
+            <section class="main-actions">
+              <button class="action-button fold" id="foldButton" data-action="fold">弃牌</button>
+              <button class="action-button call" id="callButton" data-action="check_call">过牌 / 跟注</button>
+              <button class="action-button bet" id="betButton">下注所选</button>
+              <button class="action-button allin" id="allInButton" data-action="all_in">全押</button>
+              <button class="action-button clear" id="clearBetButton">清空下注</button>
+            </section>
           </div>
         </section>
 
-        <aside class="inspector" aria-label="Strategy inspector">
-          <div class="street-mini" id="streetMini"></div>
-          <section class="panel">
+        <aside class="inspector" aria-label="规则提示区">
+          <section class="panel important">
             <div class="panel-heading">
-              <h2>AI Thinking</h2>
-              <span id="thinkingActor">Waiting</span>
+              <h2>规则提示区</h2>
+              <span id="stageLabel">牌局中</span>
             </div>
-            <div id="thinkingBody"></div>
+            <div class="rule-tip-large" id="ruleTipSide">请等待牌局载入。</div>
           </section>
+
           <section class="panel">
             <div class="panel-heading">
-              <h2>Legal Actions</h2>
-              <span id="legalCount">0</span>
+              <h2>筹码说明</h2>
+              <span id="blindLabel">小盲 / 大盲</span>
             </div>
-            <div id="legalActions"></div>
+            <div id="chipLegend"></div>
           </section>
+
           <section class="panel">
             <div class="panel-heading">
-              <h2>Q Values</h2>
-              <span>-1.0 to 1.0</span>
-            </div>
-            <div id="qValues"></div>
-          </section>
-          <section class="panel">
-            <div class="panel-heading">
-              <h2>Last 5 Actions</h2>
-              <span>All players</span>
+              <h2>牌局记录</h2>
+              <span>最近行动</span>
             </div>
             <div id="actionLog"></div>
           </section>
+
           <section class="panel">
             <div class="panel-heading">
-              <h2>Win / Loss Trend</h2>
-              <span id="trendStats">0 hands</span>
+              <h2>胜负统计</h2>
+              <span id="trendStats">0 局</span>
             </div>
             <div class="trend" id="trendChart"></div>
           </section>

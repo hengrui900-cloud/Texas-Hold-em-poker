@@ -45,8 +45,16 @@ class PokerRequestHandler(SimpleHTTPRequestHandler):
                 )
                 self._send_json(state)
                 return
+            if self.path == "/api/reset-game":
+                state = self.session.reset_game(seed=payload.get("seed"))
+                self._send_json(state)
+                return
             if self.path == "/api/action":
                 state = self.session.act(payload["action"])
+                self._send_json(state)
+                return
+            if self.path == "/api/ai-action":
+                state = self.session.ai_act()
                 self._send_json(state)
                 return
             self.send_error(HTTPStatus.NOT_FOUND, "Unknown API route")

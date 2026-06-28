@@ -5,7 +5,9 @@ __pycache__/
 .ruff_cache/
 .venv/
 venv/
-checkpoints/
+training_logs/
+checkpoints/*
 *.pt
+!checkpoints/dqn.pt
 *.npz
 *.log

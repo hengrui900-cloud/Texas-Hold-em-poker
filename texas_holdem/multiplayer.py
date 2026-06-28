@@ -23,14 +23,18 @@ class MultiplayerHoldemGame:
         seed: int | None = None,
         num_players: int = 4,
         starting_stack: int = 100,
+        starting_stacks: list[int] | None = None,
         small_blind: int = 1,
         big_blind: int = 2,
     ):
         if not 2 <= num_players <= 6:
             raise ValueError("Texas Hold'em table supports 2 to 6 players")
+        if starting_stacks is not None and len(starting_stacks) != num_players:
+            raise ValueError("starting_stacks length must match num_players")
         self.seed = seed
         self.num_players = num_players
         self.starting_stack = starting_stack
+        self.initial_stacks = list(starting_stacks) if starting_stacks is not None else [starting_stack] * num_players
         self.small_blind = small_blind
         self.big_blind = big_blind
         self.rng = random.Random(seed)
@@ -42,7 +46,7 @@ class MultiplayerHoldemGame:
             self.rng = random.Random(seed)
 
         self.deck = Deck(seed=self.rng.randrange(2**31))
-        self.players = [Player(player_id, self.starting_stack) for player_id in range(self.num_players)]
+        self.players = [Player(player_id, self.initial_stacks[player_id]) for player_id in range(self.num_players)]
         self.public_cards: list[Card] = []
         self.action_history: list[dict] = []
         self.payoffs = [0 for _ in range(self.num_players)]
@@ -241,7 +245,7 @@ class MultiplayerHoldemGame:
         self.pot = 0
         self.terminal = True
         self.stage = Stage.SHOWDOWN
-        self.payoffs = [player.stack - self.starting_stack for player in self.players]
+        self.payoffs = [player.stack - self.initial_stacks[index] for index, player in enumerate(self.players)]
         self.current_player = winner
 
     def _deal_to_river(self) -> None:
@@ -276,7 +280,7 @@ class MultiplayerHoldemGame:
         self.pot = 0
         self.stage = Stage.SHOWDOWN
         self.terminal = True
-        self.payoffs = [player.stack - self.starting_stack for player in self.players]
+        self.payoffs = [player.stack - self.initial_stacks[index] for index, player in enumerate(self.players)]
         self.current_player = max(range(self.num_players), key=lambda index: self.players[index].stack)
 
     def _snapshot(self) -> dict:
